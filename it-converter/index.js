@@ -44,7 +44,7 @@ app.post('/convert', upload.single('file'), async (req, res) => {
   const filename = baseName + '.mp3';
 
   res.setHeader('Content-Type', 'audio/mpeg');
-  res.setHeader('Content-Disposition', `attachment; filename="${filename.replace(/"/g, '\\"')}"`);
+  res.setHeader('Content-Disposition', `attachment; filename="${filename.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`);
 
   // ffmpeg: decode .it (libopenmpt) and encode to mp3 (libmp3lame) to stdout
   const ff = spawn('ffmpeg', ['-y', '-i', inPath, '-vn', '-q:a', '2', '-f', 'mp3', 'pipe:1']);
