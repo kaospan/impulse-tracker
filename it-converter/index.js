@@ -3,6 +3,7 @@ const multer = require('multer');
 const { spawn } = require('child_process');
 const fs = require('fs').promises;
 const path = require('path');
+const crypto = require('crypto');
 
 const app = express();
 const UPLOAD_DIR = path.join(__dirname, 'uploads');
@@ -10,7 +11,11 @@ const MAX_UPLOAD_MB = parseInt(process.env.MAX_UPLOAD_MB || '50', 10);
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, UPLOAD_DIR),
-  filename: (req, file, cb) => cb(null, Date.now() + '-' + file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_'))
+  filename: (req, file, cb) => {
+    const uniqueId = crypto.randomBytes(8).toString('hex');
+    const sanitized = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_');
+    cb(null, `${Date.now()}-${uniqueId}-${sanitized}`);
+  }
 });
 
 const upload = multer({ storage, limits: { fileSize: MAX_UPLOAD_MB * 1024 * 1024 } });
@@ -35,7 +40,7 @@ app.get('/', (req, res) => {
 app.post('/convert', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).send('No file uploaded');
   const inPath = req.file.path;
-  const baseName = path.parse(req.file.originalname).name;
+  const baseName = path.parse(req.file.filename).name.replace(/^\d+-[a-f0-9]+-/, '');
   const filename = baseName + '.mp3';
 
   res.setHeader('Content-Type', 'audio/mpeg');
@@ -43,14 +48,35 @@ app.post('/convert', upload.single('file'), async (req, res) => {
 
   // ffmpeg: decode .it (libopenmpt) and encode to mp3 (libmp3lame) to stdout
   const ff = spawn('ffmpeg', ['-y', '-i', inPath, '-vn', '-q:a', '2', '-f', 'mp3', 'pipe:1']);
+  let stderrData = '';
+  let timeoutId;
+  let cleanedUp = false;
+
+  const cleanup = async () => {
+    if (cleanedUp) return;
+    cleanedUp = true;
+    clearTimeout(timeoutId);
+    try { await fs.unlink(inPath); } catch (e) { }
+  };
+
+  // Kill ffmpeg if it runs for more than 5 minutes
+  timeoutId = setTimeout(() => {
+    console.error('ffmpeg timeout - killing process');
+    ff.kill('SIGKILL');
+  }, 5 * 60 * 1000);
 
   ff.stdout.pipe(res);
 
-  ff.stderr.on('data', (d) => console.error('ffmpeg:', d.toString()));
+  ff.stderr.on('data', (d) => {
+    const msg = d.toString();
+    stderrData += msg;
+    console.error('ffmpeg:', msg);
+  });
 
   ff.on('close', async (code) => {
-    try { await fs.unlink(inPath); } catch (e) { }
+    await cleanup();
     if (code !== 0) {
+      console.error('ffmpeg stderr:', stderrData);
       if (!res.headersSent) res.status(500).send('Conversion failed');
       else res.end();
     } else {
@@ -60,7 +86,7 @@ app.post('/convert', upload.single('file'), async (req, res) => {
 
   ff.on('error', async (err) => {
     console.error('ffmpeg spawn error', err);
-    try { await fs.unlink(inPath); } catch (e) { }
+    await cleanup();
     if (!res.headersSent) res.status(500).send('Conversion failed');
   });
 });

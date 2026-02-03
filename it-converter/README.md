@@ -53,7 +53,7 @@ Converts an uploaded .it file to MP3.
 - **Content-Type**: `multipart/form-data`
 - **Field name**: `file`
 - **Accepted formats**: `.it`
-- **Response**: MP3 audio file (application/octet-stream)
+- **Response**: MP3 audio file (audio/mpeg)
 
 Example using curl:
 
