@@ -40,11 +40,11 @@ app.get('/', (req, res) => {
 app.post('/convert', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).send('No file uploaded');
   const inPath = req.file.path;
-  const baseName = path.parse(req.file.filename).name.replace(/^\d+-[a-f0-9]+-/, '');
+  const baseName = path.parse(req.file.filename).name.replace(/^\d+-[a-fA-F0-9]+-/, '');
   const filename = baseName + '.mp3';
 
   res.setHeader('Content-Type', 'audio/mpeg');
-  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.setHeader('Content-Disposition', `attachment; filename="${filename.replace(/"/g, '\\"')}"`);
 
   // ffmpeg: decode .it (libopenmpt) and encode to mp3 (libmp3lame) to stdout
   const ff = spawn('ffmpeg', ['-y', '-i', inPath, '-vn', '-q:a', '2', '-f', 'mp3', 'pipe:1']);
@@ -56,7 +56,11 @@ app.post('/convert', upload.single('file'), async (req, res) => {
     if (cleanedUp) return;
     cleanedUp = true;
     clearTimeout(timeoutId);
-    try { await fs.unlink(inPath); } catch (e) { }
+    try { 
+      await fs.unlink(inPath); 
+    } catch (e) { 
+      console.error('Failed to cleanup file:', inPath, e.message);
+    }
   };
 
   // Kill ffmpeg if it runs for more than 5 minutes
@@ -92,7 +96,13 @@ app.post('/convert', upload.single('file'), async (req, res) => {
 });
 
 // ensure upload dir exists
-fs.mkdir(UPLOAD_DIR, { recursive: true }).catch(console.error);
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`IT→MP3 converter listening on :${PORT}`));
+(async () => {
+  try {
+    await fs.mkdir(UPLOAD_DIR, { recursive: true });
+    const PORT = process.env.PORT || 3000;
+    app.listen(PORT, () => console.log(`IT→MP3 converter listening on :${PORT}`));
+  } catch (err) {
+    console.error('Failed to create upload directory:', err);
+    process.exit(1);
+  }
+})();
